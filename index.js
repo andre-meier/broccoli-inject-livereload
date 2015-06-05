@@ -1,60 +1,53 @@
-var CachingWriter = require('broccoli-caching-writer');
+var Writer = require('broccoli-writer');
+var fs = require('fs-extra');
 var path = require('path');
-var mkdirp = require('mkdirp');
-var fs = require('fs');
-var walkSync = require('walk-sync');
 
 function InjectLivereload(inputTree, options) {
   if (!(this instanceof InjectLivereload)) {
     return new InjectLivereload(inputTree, options);
   }
 
-  this.enforceSingleInputTree = true;
+  this.options = options || {};
 
-  options = options || {};
-  this.port = options.port || 35729;
+  this.options.port = this.options.port || 35729;
+  this.options.src = this.options.src || 'index.html';
 
-  CachingWriter.apply(this, arguments);
+  this.inputTree = inputTree;
 }
 
-InjectLivereload.prototype = Object.create(CachingWriter.prototype);
+InjectLivereload.prototype = Object.create(Writer.prototype);
 InjectLivereload.prototype.constructor = InjectLivereload;
 
-InjectLivereload.prototype.updateCache = function (srcDir, destDir) {
+InjectLivereload.prototype.write = function (readTree, destDir) {
   var self = this;
 
-  walkSync(srcDir).forEach(function (relativePath) {
-    if (relativePath.slice(-1) !== '/') {
-      self.handleFile(srcDir, destDir, relativePath);
-    }
+  return readTree(self.inputTree).then(function (srcDir) {
+    self.injectLivereloadScript(srcDir, destDir);
   });
 };
 
-InjectLivereload.prototype.handleFile = function (srcDir, destDir, relativePath) {
-  var fullInputPath = path.join(srcDir, relativePath);
-  var fullOutputPath = path.join(destDir, relativePath);
-  var contents;
+InjectLivereload.prototype.injectLivereloadScript = function (srcDir, destDir) {
+  var self = this;
 
   var snippet = [
     "<!-- livereload snippet -->",
     "<script>document.write('<script src=\"http://'",
     " + (location.host || 'localhost').split(':')[0]",
-    " + ':" + this.port + "/livereload.js?snipver=1\"><\\/script>')",
+    " + ':" + this.options.port + "/livereload.js\"><\\/script>')",
     "</script>",
     ""
   ].join('\n');
 
-  if (path.extname(relativePath) === '.html') {
-    contents = fs.readFileSync(fullInputPath, 'utf-8');
-    contents = contents.replace(/<\/body>/, function (w) {
+  var file = srcDir + '/' + self.options.src;
+  var data = fs.readFileSync(file, 'utf-8');
+
+  if (path.extname(file) === '.html') {
+    data = data.replace(/<\/body>/, function (w) {
       return snippet + w;
     });
-  } else {
-    contents = fs.readFileSync(fullInputPath);
   }
 
-  mkdirp.sync(path.dirname(fullOutputPath));
-  fs.writeFileSync(fullOutputPath, contents);
+  fs.outputFileSync(destDir + '/' + self.options.src, data);
 };
 
 module.exports = InjectLivereload;
